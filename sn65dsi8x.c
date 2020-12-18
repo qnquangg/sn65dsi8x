@@ -42,23 +42,93 @@
 #include <linux/notifier.h>
 #include <linux/fb.h>
 
-static int sn65dsi8x_parse_dt() {
+#include "sn65dsi8x.h"
 
+struct sn65dsi8x_t
+{
+	int reset_gpio;
+	int display_reset_gpio;
+	struct i2c_client *client;
+	struct sn65dsi8x_params_t *params;
+};
+
+static int sn65dsi8x_parse_dt(struct sn65dsi8x_t *lvds_bridge)
+{
+	struct device_node *node;
+	struct device *dev;
+	int ret = 0;
+
+	dev = &lvds_bridge->client->dev;
+	if (!dev)
+	{
+		pr_err("%s: Cannot find any devices in device tree\n", __func__);
+		return -ENODEV;
+	}
+
+	node = dev->of_node;
+
+	/* Get reset gpio of LVDS bridge IC */
+	lvds_bridge->reset_gpio = of_get_named_gpio(node, "ti,reset-gpio", 0);
+	if (!gpio_is_valid(lvds_bridge->reset_gpio))
+	{
+		pr_err("%s: Invalid GPIO, reset-gpio: %d\n", __func__, lvds_bridge->reset_gpio);
+		return -EINVAL;
+	}
+	/* Request reset gpio of LVDS bridge IC */
+	ret = gpio_request(lvds_bridge->reset_gpio, "ti-reset-gpio");
+	if (ret)
+	{
+		pr_err("%s: request ti-reset-gpio gpio failed, ret=%d\n", __func__, ret);
+		return -EINVAL;
+	}
+
+	/* Get reset gpio of LCD panel */
+	lvds_bridge->display_reset_gpio = of_get_named_gpio(node, "qcom,platform-reset-gpio", 0);
+	if (!gpio_is_valid(lvds_bridge->display_reset_gpio))
+	{
+		pr_err("%s: Invalid GPIO, display_reset_gpio: %d\n", __func__, lvds_bridge->display_reset_gpio);
+		goto display_reset_gpio_err;
+	}
+	/* Request reset gpio of LCD panel */
+	ret = gpio_request(lvds_bridge->display_reset_gpio, "display-reset-gpio");
+	if (ret)
+	{
+		pr_err("%s: request ti-rst-gpio gpio failed, ret=%d\n", __func__, ret);
+		goto display_reset_gpio_err;
+	}
+
+	/* Success */
+	return 0;
+
+	/* Error */
+display_reset_gpio_err:
+	gpio_free(lvds_bridge->reset_gpio);
+	return -EINVAL;
 }
 
-static int sn65dsi8x_probe(struct i2c_client *client, const struct i2c_device_id *id) {
-    
-    return 0;
+static int sn65dsi8x_probe(struct i2c_client *client, const struct i2c_device_id *id)
+{
+	struct sn65dsi8x_t lvds_bridge;
+
+	lvds_bridge.params = sn65dsi8x_parameters;
+	lvds_bridge.client = client;
+
+	/* Parse device tree */
+	sn65dsi8x_parse_dt(&lvds_bridge);
+
+	return 0;
 }
 
 static int sn65dsi8x_remove(struct i2c_client *client)
 {
-    return 0;
+	return 0;
 }
 
 static const struct of_device_id sn65dsi8x_match_table[] = {
-		{.compatible = "ti,sn65dsi8x",},
-		{ },
+	{
+		.compatible = "ti,sn65dsi8x",
+	},
+	{},
 };
 
 static const struct i2c_device_id sn65dsi8x_id[] = {
@@ -71,10 +141,10 @@ static struct i2c_driver sn65dsi8x_driver = {
 	.remove = sn65dsi8x_remove,
 	.id_table = sn65dsi8x_id,
 	.driver = {
-		   .name = "sn65dsi8x",
-		   .owner = THIS_MODULE,
-		   .of_match_table = sn65dsi8x_match_table,
-		   },
+		.name = "sn65dsi8x",
+		.owner = THIS_MODULE,
+		.of_match_table = sn65dsi8x_match_table,
+	},
 };
 
 static int __init sn65dsi8x_init(void)

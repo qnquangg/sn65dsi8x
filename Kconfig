@@ -1,0 +1,8 @@
+config INPUT_TI_SN65DSI8X
+        tristate "TI SN65DSI8X support"
+        depends on INPUT && I2C
+        help
+          Say Y to enable support for TI SN65DSI8X.
+
+          To compile this driver as a module, choose M here: the
+          module will be called sn65dsi8x.

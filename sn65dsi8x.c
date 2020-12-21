@@ -78,7 +78,7 @@ static int sn65dsi8x_parse_dt(struct sn65dsi8x_t *lvds_bridge)
 	ret = gpio_request(lvds_bridge->reset_gpio, "ti-reset-gpio");
 	if (ret)
 	{
-		pr_err("%s: request ti-reset-gpio gpio failed, ret=%d\n", __func__, ret);
+		pr_err("%s: request ti,reset-gpio failed, ret=%d\n", __func__, ret);
 		return -EINVAL;
 	}
 
@@ -93,7 +93,7 @@ static int sn65dsi8x_parse_dt(struct sn65dsi8x_t *lvds_bridge)
 	ret = gpio_request(lvds_bridge->display_reset_gpio, "display-reset-gpio");
 	if (ret)
 	{
-		pr_err("%s: request ti-rst-gpio gpio failed, ret=%d\n", __func__, ret);
+		pr_err("%s: request display-reset-gpio failed, ret=%d\n", __func__, ret);
 		goto display_reset_gpio_err;
 	}
 
@@ -106,15 +106,76 @@ display_reset_gpio_err:
 	return -EINVAL;
 }
 
+static int sn65dsi8x_i2c_write(struct i2c_adapter *adap, u8 adr, u8 *data, int len)
+{
+	int ret;
+	struct i2c_msg msg = { 
+		.addr = adr, 
+		.flags = 0,
+		.buf = data, 
+		.len = len 
+	};
+
+	ret = i2c_transfer(adap, &msg, 1);
+	if (ret != 1) 
+		return -EIO;
+	if (ret < 0)
+		return ret;
+	
+	return 0;
+}
+
+static int sn65dsi8x_i2c_write_reg(struct i2c_client *client, u8 reg, u8 val)
+{
+	u8 msg[2] = { reg, val };
+
+	return sn65dsi8x_i2c_write(client->adapter, client->addr, msg, 2);
+}
+
+static int sn65dsi8x_write_settings(struct i2c_client *client, struct sn65dsi8x_params_t *params)
+{
+	int i, ret;
+
+	for (i = 0; i < ARRAY_SIZE(sn65dsi8x_parameters); i++ )
+	{
+		ret = sn65dsi8x_i2c_write_reg(client, params[i].reg, params[i].value);
+		if (ret) 
+		{
+			pr_err("%s: Failed to write i2c data at reg = 0x%x, value = 0x%x \n", __func__, params[i].reg, params[i].value);
+			return -EINVAL;
+		}
+	}
+
+	return ret;
+
+}
+
 static int sn65dsi8x_probe(struct i2c_client *client, const struct i2c_device_id *id)
 {
 	struct sn65dsi8x_t lvds_bridge;
+	int ret = 0;
 
 	lvds_bridge.params = sn65dsi8x_parameters;
 	lvds_bridge.client = client;
 
 	/* Parse device tree */
-	sn65dsi8x_parse_dt(&lvds_bridge);
+	ret = sn65dsi8x_parse_dt(&lvds_bridge);
+	if (ret)
+	{
+		pr_err("%s: Failed to parse device tree, ret=%d\n", __func__, ret);
+		return -EINVAL;
+	}
+
+	/* Write settings LVDS Bridge IC */
+	ret = sn65dsi8x_write_settings(lvds_bridge.client, lvds_bridge.params);
+	if (ret)
+	{
+		pr_err("%s: Failed to write settings sn65dsi8x, ret=%d\n", __func__, ret);
+		return -EINVAL;
+	}
+
+	/* Start LVDS Bridge IC */
+	
 
 	return 0;
 }

@@ -132,18 +132,151 @@ static int sn65dsi8x_i2c_write_reg(struct i2c_client *client, u8 reg, u8 val)
 	return sn65dsi8x_i2c_write(client->adapter, client->addr, msg, 2);
 }
 
-static int sn65dsi8x_write_settings(struct i2c_client *client, struct sn65dsi8x_params_t *params)
+static int sn65dsi8x_i2c_read_reg(struct i2c_client *client, u8 reg, u8 *val)
+{
+	struct i2c_msg msgs[2] = {
+		{
+			.addr = client->addr,
+			.flags = 0,
+			.buf = &reg,
+			.len = 1
+		},
+		{
+			.addr = client->addr,
+			.flags = I2C_M_RD,
+			.buf = val,
+			.len = 1
+		}
+	};
+
+	if (i2c_transfer(client->adapter, msgs, 2) != 2) {
+		return -1;
+	}
+
+	return 0;
+}
+
+static void sn65dsi8x_reset(struct sn65dsi8x_t *lvds_bridge)
+{
+	gpio_direction_output(lvds_bridge->reset_gpio, 0);
+	gpio_set_value(lvds_bridge->reset_gpio, 0);
+	mdelay(50);
+	gpio_set_value(lvds_bridge->reset_gpio, 1);
+	mdelay(50);
+}
+
+static int sn65dsi8x_soft_reset(struct sn65dsi8x_t *lvds_bridge)
+{
+	int ret;
+	u8 val = 0;
+
+	ret = sn65dsi8x_i2c_read_reg(lvds_bridge->client, SOFT_RESET_REG, &val);
+	if (ret)
+	{
+		pr_err("%s: Failed to read SOFT_RESET_REG of sn65dsi8x \n", __func__);
+		return ret;
+	}
+	val |= 0x01;
+	ret = sn65dsi8x_i2c_write_reg(lvds_bridge->client, SOFT_RESET_REG, val);
+	if (ret)
+	{
+		pr_err("%s: Failed to write SOFT_RESET_REG of sn65dsi8x \n", __func__);
+		return ret;
+	}
+	mdelay(10);
+
+	return ret;
+}
+
+static int sn65dsi8x_disable_pll(struct sn65dsi8x_t *lvds_bridge)
+{
+	int ret;
+	u8 val = 0;
+
+	ret = sn65dsi8x_i2c_read_reg(lvds_bridge->client, PLL_EN_REG, &val);
+	if (ret)
+	{
+		pr_err("%s: Failed to read PLL_EN_REG of sn65dsi8x \n", __func__);
+		return ret;
+	}
+	val &= 0xFE;
+	ret = sn65dsi8x_i2c_write_reg(lvds_bridge->client, PLL_EN_REG, val);
+	if (ret)
+	{
+		pr_err("%s: Failed to write PLL_EN_REG of sn65dsi8x \n", __func__);
+		return ret;
+	}
+	mdelay(10);
+
+	return ret;
+}
+
+static int sn65dsi8x_enable_pll(struct sn65dsi8x_t *lvds_bridge)
+{
+	int ret;
+	u8 val = 0;
+
+	ret = sn65dsi8x_i2c_read_reg(lvds_bridge->client, PLL_EN_REG, &val);
+	if (ret)
+	{
+		pr_err("%s: Failed to read PLL_EN_REG of sn65dsi8x \n", __func__);
+		return ret;
+	}
+	val |= 0x01;
+	ret = sn65dsi8x_i2c_write_reg(lvds_bridge->client, PLL_EN_REG, val);
+	if (ret)
+	{
+		pr_err("%s: Failed to write PLL_EN_REG of sn65dsi8x \n", __func__);
+		return ret;
+	}
+	mdelay(10);
+
+	return ret;
+}
+
+static int sn65dsi8x_configure(struct sn65dsi8x_t *lvds_bridge)
 {
 	int i, ret;
 
+	sn65dsi8x_reset(lvds_bridge);
+
+	ret = sn65dsi8x_soft_reset(lvds_bridge);
+	if (ret)
+	{
+		pr_err("%s: Failed to soft reset sn65dsi8x \n", __func__);
+		return ret;
+	}
+
+	ret = sn65dsi8x_disable_pll(lvds_bridge);
+	if (ret)
+	{
+		pr_err("%s: Failed to disable PLL of sn65dsi8x \n", __func__);
+		return ret;
+	}
+
 	for (i = 0; i < ARRAY_SIZE(sn65dsi8x_parameters); i++ )
 	{
-		ret = sn65dsi8x_i2c_write_reg(client, params[i].reg, params[i].value);
+		ret = sn65dsi8x_i2c_write_reg(lvds_bridge->client, lvds_bridge->params[i].reg, lvds_bridge->params[i].value);
 		if (ret) 
 		{
-			pr_err("%s: Failed to write i2c data at reg = 0x%x, value = 0x%x \n", __func__, params[i].reg, params[i].value);
+			pr_err("%s: Failed to write i2c data at reg = 0x%x, value = 0x%x \n", __func__, lvds_bridge->params[i].reg, lvds_bridge->params[i].value);
 			return -EINVAL;
 		}
+		mdelay(10);
+	}
+
+	ret = sn65dsi8x_enable_pll(lvds_bridge);
+	if (ret)
+	{
+		pr_err("%s: Failed to enable PLL of sn65dsi8x \n", __func__);
+		return ret;
+	}
+
+	ret = sn65dsi8x_soft_reset(lvds_bridge);
+	if (ret)
+	{
+		pr_err("%s: Failed to soft reset sn65dsi8x \n", __func__);
+		return ret;
 	}
 
 	return ret;
@@ -167,15 +300,12 @@ static int sn65dsi8x_probe(struct i2c_client *client, const struct i2c_device_id
 	}
 
 	/* Write settings LVDS Bridge IC */
-	ret = sn65dsi8x_write_settings(lvds_bridge.client, lvds_bridge.params);
+	ret = sn65dsi8x_configure(&lvds_bridge);
 	if (ret)
 	{
 		pr_err("%s: Failed to write settings sn65dsi8x, ret=%d\n", __func__, ret);
 		return -EINVAL;
 	}
-
-	/* Start LVDS Bridge IC */
-	
 
 	return 0;
 }

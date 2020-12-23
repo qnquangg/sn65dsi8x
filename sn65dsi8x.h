@@ -91,6 +91,9 @@
 #define VALUE_REGISTER_0x3D              0x00
 #define VALUE_REGISTER_0x3E              0x00
 
+#define SOFT_RESET_REG                  0x09
+#define PLL_EN_REG                      0x0D
+
 struct sn65dsi8x_params_t {
     u8 reg;
     u8 value;
